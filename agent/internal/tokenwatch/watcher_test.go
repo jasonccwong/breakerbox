@@ -27,6 +27,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows os.UserHomeDir reads USERPROFILE
 	proj := filepath.Join(home, ".claude", "projects", "-test-proj")
 	if err := os.MkdirAll(proj, 0o755); err != nil {
 		t.Fatal(err)
@@ -183,6 +184,7 @@ func TestOfflineEmitRetriesWithoutLoss(t *testing.T) {
 func TestCheckpointSurvivesRestart(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows os.UserHomeDir reads USERPROFILE
 	proj := filepath.Join(home, ".claude", "projects", "-p")
 	_ = os.MkdirAll(proj, 0o755)
 	stateDir := t.TempDir()
@@ -221,6 +223,7 @@ func codexLine50(payload string) string { return payload + "\n" }
 func TestCodexDeltas(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows os.UserHomeDir reads USERPROFILE
 	day := filepath.Join(home, ".codex", "sessions", "2026", "07", "20")
 	_ = os.MkdirAll(day, 0o755)
 	content := codexLine50(`{"timestamp":"2026-07-20T10:00:00.000Z","type":"session_meta","payload":{"type":"session_meta","id":"cs-1","cwd":"/srv/myapp"}}`) +
