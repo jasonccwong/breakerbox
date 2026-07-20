@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -22,6 +23,7 @@ func main() {
 		spawnChild    = flag.Bool("spawn-child", false, "spawn a grandchild copy of this process")
 		exitAfter     = flag.Duration("exit-after", 0, "exit with code 0 after this duration (0 = run forever)")
 		ignoreSigterm = flag.Bool("ignore-sigterm", false, "ignore SIGTERM/SIGINT (forces SIGKILL escalation)")
+		llmCall       = flag.Bool("llm-call", false, "POST one fake completion to $ANTHROPIC_BASE_URL/v1/messages at startup")
 	)
 	flag.Parse()
 
@@ -45,6 +47,27 @@ func main() {
 		}
 		log.Printf("spawned grandchild pid=%d", child.Process.Pid)
 		go child.Wait()
+	}
+
+	if *llmCall {
+		// Exercises the runtime metering path: honors the injected base URL
+		// exactly like a provider SDK would.
+		go func() {
+			base := os.Getenv("ANTHROPIC_BASE_URL")
+			if base == "" {
+				log.Printf("llm-call: ANTHROPIC_BASE_URL not set, skipping")
+				return
+			}
+			time.Sleep(500 * time.Millisecond) // let the proxy settle
+			resp, err := http.Post(base+"/v1/messages", "application/json",
+				strings.NewReader(`{"model":"claude-fable-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}`))
+			if err != nil {
+				log.Printf("llm-call failed: %v", err)
+				return
+			}
+			defer resp.Body.Close()
+			log.Printf("llm-call status=%d via %s", resp.StatusCode, base)
+		}()
 	}
 
 	if *burnCPU {

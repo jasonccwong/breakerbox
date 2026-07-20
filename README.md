@@ -6,7 +6,7 @@ BreakerBox is a lightweight, open-source control panel for the apps you run on y
 
 Think **Beszel + Dockge + ccusage in one pane**.
 
-> ⚠️ **Status: alpha, under active development.** Hub + agent (macOS & Linux) + web dashboard + mobile app work end-to-end today: app on/off switches, native **and Docker/Compose** apps, crash-restart policies, resurrect-on-boot, live log streaming, metric history, ntfy push alerts, and **zero-config LLM token tracking** — Claude Code and Codex sessions are priced and attributed to your apps automatically. Windows agent and the runtime token proxy land next. Nothing is stable yet — star/watch to follow along.
+> ⚠️ **Status: alpha, under active development.** Hub + agent (macOS & Linux) + web dashboard + mobile app work end-to-end today: app on/off switches, native **and Docker/Compose** apps, crash-restart policies, resurrect-on-boot, live log streaming, metric history, ntfy push alerts, and **zero-config LLM token tracking** — Claude Code and Codex sessions are priced and attributed to your apps automatically. Windows hosts are now first-class (agent runs as a Windows Service, Job-Object process trees), and runtime API metering is available per app via an env-injected local proxy. Nothing is stable yet — star/watch to follow along.
 
 ## Why another panel?
 
@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/jasonccwong/breakerbox/main/scripts
 
 Then **+ Add app** → let Claude Code/Codex generate the app definition → approve
 it on the host → flip the switch. Hub at home? See [docs/home-hub.md](docs/home-hub.md)
-for Cloudflare Tunnel / Tailscale setups.
+for Cloudflare Tunnel / Tailscale setups. Windows: see [docs/windows.md](docs/windows.md).
 
 ## Token tracking
 
@@ -73,8 +73,11 @@ streaming rewrites, prices every row against the LiteLLM community price
 table, and attributes spend to your apps by working directory. The **Tokens**
 screen shows daily spend stacked by model, per-app totals, and an explicit
 "Unattributed" bucket so nothing is silently dropped. Optional daily
-spend-threshold alerts arrive via ntfy. No API keys, no proxies, no app
-changes — that's Phase 4's opt-in runtime proxy.
+spend-threshold alerts arrive via ntfy. For runtime API spend, flip **Runtime
+API metering** on an app: the agent injects `ANTHROPIC_BASE_URL` /
+`OPENAI_BASE_URL` so the app's live calls are metered through a local proxy —
+plain forwarding, no TLS interception, no app changes. Details in
+[docs/token-tracking.md](docs/token-tracking.md).
 
 ## Mobile app
 
@@ -89,7 +92,8 @@ auth tokens live in the platform secure store. Run it today with
 - ~~**Phase 1:** macOS agent + hub + web dashboard walking skeleton — enroll, register an app, flip the switch, watch live CPU/mem~~ ✅
 - ~~**Phase 2:** Linux/VPS support, Docker & Compose apps, restart policies, log viewer, install scripts, ntfy alerts~~ ✅ — first public alpha
 - ~~**Phase 3:** Token tracking (Claude Code + Codex), mobile app (iOS/Android)~~ ✅
-- **Phase 4 (next):** Windows agent, runtime token proxy, v0.1.0
+- ~~**Phase 4:** Windows agent, runtime token proxy, v0.1.0~~ ✅
+- **Next:** hardening toward beta — community feedback drives the list ([open an issue](https://github.com/jasonccwong/breakerbox/issues))
 
 ## Development
 

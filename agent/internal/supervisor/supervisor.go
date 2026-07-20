@@ -47,8 +47,9 @@ type Proc struct {
 }
 
 // StartProc spawns the definition's command in its own process group/tree.
-// stdout/stderr both go to logSink (may be nil).
-func StartProc(def protocol.AppDefinition, logSink *os.File) (*Proc, error) {
+// stdout/stderr both go to logSink (may be nil). extraEnv entries ("K=V")
+// append after the definition env — used for token-proxy injection.
+func StartProc(def protocol.AppDefinition, logSink *os.File, extraEnv []string) (*Proc, error) {
 	if def.Cmd == "" {
 		return nil, fmt.Errorf("empty cmd")
 	}
@@ -58,6 +59,7 @@ func StartProc(def protocol.AppDefinition, logSink *os.File) (*Proc, error) {
 	for k, v := range def.Env {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
+	cmd.Env = append(cmd.Env, extraEnv...)
 	if logSink != nil {
 		cmd.Stdout = logSink
 		cmd.Stderr = logSink
@@ -66,6 +68,9 @@ func StartProc(def protocol.AppDefinition, logSink *os.File) (*Proc, error) {
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
+	// Windows: bind the fresh process into a kill-on-close Job Object so the
+	// whole tree dies as one unit. Unix: no-op (process group set pre-start).
+	attachTree(cmd.Process.Pid)
 
 	p := &Proc{def: def, cmd: cmd, done: make(chan struct{})}
 	go func() {

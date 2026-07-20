@@ -46,6 +46,14 @@ jobs:
           (cd hub && go build .)
           (cd cmd/testapp && go build .)
         shell: bash
+      - name: Validate install-agent.ps1 syntax
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $tokens = $null; $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile("scripts/install-agent.ps1", [ref]$tokens, [ref]$errors) | Out-Null
+          if ($errors.Count -gt 0) { $errors | ForEach-Object { throw $_.Message } }
+          Write-Host "install-agent.ps1 parses cleanly"
 
   web:
     name: Web

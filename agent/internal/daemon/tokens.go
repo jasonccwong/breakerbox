@@ -46,3 +46,33 @@ func (d *Daemon) emitTokenRows(rows []protocol.TokenUsageRow) bool {
 	}
 	return conn.Send(protocol.TypeTokenUsageBatch, protocol.TokenUsageBatch{Rows: rows}) == nil
 }
+
+// maxProxyBuffer bounds offline-buffered runtime-proxy rows.
+const maxProxyBuffer = 5000
+
+// queueProxyRows is the tokenproxy emit sink: try immediate delivery, buffer
+// while offline (flushed by flushProxyRows on the metrics cadence).
+func (d *Daemon) queueProxyRows(rows []protocol.TokenUsageRow) {
+	if d.emitTokenRows(rows) {
+		return
+	}
+	d.mu.Lock()
+	d.proxyRowsBuf = append(d.proxyRowsBuf, rows...)
+	if over := len(d.proxyRowsBuf) - maxProxyBuffer; over > 0 {
+		d.proxyRowsBuf = d.proxyRowsBuf[over:]
+	}
+	d.mu.Unlock()
+}
+
+// flushProxyRows retries buffered proxy rows once a connection exists.
+func (d *Daemon) flushProxyRows() {
+	d.mu.Lock()
+	buf := d.proxyRowsBuf
+	d.proxyRowsBuf = nil
+	d.mu.Unlock()
+	if len(buf) > 0 && !d.emitTokenRows(buf) {
+		d.mu.Lock()
+		d.proxyRowsBuf = append(buf, d.proxyRowsBuf...)
+		d.mu.Unlock()
+	}
+}

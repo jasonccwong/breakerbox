@@ -16,6 +16,9 @@ func configureSysProc(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
+// attachTree is a no-op on unix: the process group was configured pre-start.
+func attachTree(int) {}
+
 // signalTree sends sig to the child's entire process group.
 func signalTree(pid int, sig syscall.Signal) error {
 	// Negative pid targets the process group.

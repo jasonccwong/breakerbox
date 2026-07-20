@@ -110,6 +110,11 @@ func cmdEnroll(store *appconfig.Store, args []string) error {
 }
 
 func cmdRun(store *appconfig.Store) error {
+	// Under the Windows Service Control Manager the SCM protocol replaces
+	// posix signal handling; console runs fall through to the normal path.
+	if handled, err := maybeRunAsService(store); handled {
+		return err
+	}
 	priv, err := identity.LoadOrCreate(store.Dir)
 	if err != nil {
 		return err

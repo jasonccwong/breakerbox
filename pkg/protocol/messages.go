@@ -79,10 +79,13 @@ type AppSync struct {
 
 // AppSpec is one app as the hub knows it.
 type AppSpec struct {
-	ID             string       `json:"id"`
+	ID             string        `json:"id"`
 	Definition     AppDefinition `json:"definition"`
-	DefinitionHash string       `json:"definition_hash"`
-	DesiredState   DesiredState `json:"desired_state"`
+	DefinitionHash string        `json:"definition_hash"`
+	DesiredState   DesiredState  `json:"desired_state"`
+	// TokenTracking: "off" | "dev" | "runtime". "runtime" makes the agent
+	// inject provider base-URL env vars pointing at its metering proxy.
+	TokenTracking string `json:"token_tracking,omitempty"`
 }
 
 // Cmd instructs the agent to run one verb against one app. The agent refuses

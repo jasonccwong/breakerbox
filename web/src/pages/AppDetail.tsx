@@ -110,6 +110,13 @@ export default function AppDetail() {
       </section>
 
       <section className="mt-8">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">
+          Token metering
+        </h2>
+        <RuntimeMeteringToggle app={app} />
+      </section>
+
+      <section className="mt-8">
         <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">Logs</h2>
         <LogViewer appId={app.id} />
       </section>
@@ -121,6 +128,57 @@ export default function AppDetail() {
         </pre>
         <p className="mt-2 text-xs text-zinc-600">hash {app.definition_hash}</p>
       </section>
+    </div>
+  );
+}
+
+function RuntimeMeteringToggle({ app }: { app: AppRecord }) {
+  const qc = useQueryClient();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const enabled = app.token_tracking === "runtime";
+
+  async function setRuntime(next: boolean) {
+    setSaving(true);
+    setError("");
+    try {
+      await pb.collection("apps").update(app.id, { token_tracking: next ? "runtime" : "dev" });
+      qc.invalidateQueries({ queryKey: ["app", app.id] });
+    } catch {
+      setError("Could not save — check the hub connection and try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm font-medium">Runtime API metering</div>
+          <p className="mt-1 text-xs leading-5 text-zinc-500">
+            Routes this app's Anthropic/OpenAI traffic through the agent's local metering proxy
+            (via <code className="rounded bg-zinc-900 px-1">ANTHROPIC_BASE_URL</code> /{" "}
+            <code className="rounded bg-zinc-900 px-1">OPENAI_BASE_URL</code> env injection) so its
+            live token spend shows on the Tokens screen. No app changes needed — SDKs honor these
+            variables automatically. Applies on the next app start.
+            {app.kind !== "process" && app.kind !== "" && (
+              <span className="text-amber-500"> Process apps only — container apps manage their own env.</span>
+            )}
+          </p>
+          {error && <p className="mt-1 text-xs text-red-400">{error}</p>}
+        </div>
+        <Toggle
+          on={enabled}
+          busy={saving}
+          disabled={app.kind !== "process" && app.kind !== ""}
+          onChange={setRuntime}
+        />
+      </div>
+      <p className="mt-2 text-xs text-zinc-600">
+        Dev-time spend (Claude Code / Codex sessions in this app's directory) is always tracked —
+        this toggle only adds runtime API calls.
+      </p>
     </div>
   );
 }

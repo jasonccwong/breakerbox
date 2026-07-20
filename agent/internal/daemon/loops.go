@@ -34,6 +34,7 @@ func (d *Daemon) metricsLoop(ctx context.Context) {
 				batch.Apps = append(batch.Apps, d.dockerAppSamples(batch.Host[0].TS)...)
 			}
 			d.sendMetrics(batch)
+			d.flushProxyRows()
 		case <-ctx.Done():
 			return
 		}

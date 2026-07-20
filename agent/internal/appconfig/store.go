@@ -39,10 +39,11 @@ func DefaultStateDir() string {
 
 // AppState is the agent's local view of one app.
 type AppState struct {
-	Definition   protocol.AppDefinition `json:"definition"`
-	Hash         string                 `json:"hash"`
-	Approval     protocol.Approval      `json:"approval"`
-	DesiredState protocol.DesiredState  `json:"desired_state"`
+	Definition    protocol.AppDefinition `json:"definition"`
+	Hash          string                 `json:"hash"`
+	Approval      protocol.Approval      `json:"approval"`
+	DesiredState  protocol.DesiredState  `json:"desired_state"`
+	TokenTracking string                 `json:"token_tracking,omitempty"`
 	// LastPID/LastCmdBase identify the process tree from the previous agent
 	// run so a restarted agent can clean up orphans before resurrecting
 	// (children survive an agent crash on unix). CmdBase guards against PID

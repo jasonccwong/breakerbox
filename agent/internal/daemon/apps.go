@@ -40,7 +40,19 @@ func (d *Daemon) startApp(appID string) error {
 		return err
 	}
 	d.sendEvent(appID, protocol.StatusStarting, 0, nil)
-	p, err := supervisor.StartProc(app.Definition, logFile)
+	// Opt-in runtime metering: point provider SDKs at the local proxy.
+	var extraEnv []string
+	if app.TokenTracking == "runtime" {
+		d.mu.Lock()
+		proxy := d.proxy
+		d.mu.Unlock()
+		if proxy != nil {
+			extraEnv = proxy.EnvFor(appID)
+		} else {
+			slog.Warn("app wants runtime token metering but the proxy is not running", "app", appID)
+		}
+	}
+	p, err := supervisor.StartProc(app.Definition, logFile, extraEnv)
 	if err != nil {
 		d.sendEvent(appID, protocol.StatusErrored, 0, nil)
 		return err

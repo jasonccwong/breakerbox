@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -29,6 +30,9 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	testappBin = filepath.Join(dir, "testapp")
+	if runtime.GOOS == "windows" {
+		testappBin += ".exe"
+	}
 	build := exec.Command("go", "build", "-o", testappBin, "github.com/breakerbox/breakerbox/cmd/testapp")
 	build.Dir = "../../.." // workspace root so go.work resolves the module
 	if out, err := build.CombinedOutput(); err != nil {
@@ -81,7 +85,7 @@ func TestStopKillsWholeTree(t *testing.T) {
 		SchemaVersion: 1, Name: "tree", Kind: protocol.KindProcess,
 		Cmd: testappBin, Args: []string{"-spawn-child"},
 	}
-	p, err := StartProc(def, nil)
+	p, err := StartProc(def, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +110,7 @@ func TestStopEscalatesToSigkill(t *testing.T) {
 		Args: []string{"-ignore-sigterm", "-spawn-child"},
 		Stop: &protocol.StopSpec{Signal: "SIGTERM", TimeoutS: 1},
 	}
-	p, err := StartProc(def, nil)
+	p, err := StartProc(def, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +138,7 @@ func TestCleanExitObserved(t *testing.T) {
 		SchemaVersion: 1, Name: "shortlived", Kind: protocol.KindProcess,
 		Cmd: testappBin, Args: []string{"-exit-after", "300ms"},
 	}
-	p, err := StartProc(def, nil)
+	p, err := StartProc(def, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +165,7 @@ func TestEnvAndCwdApplied(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.Remove(logFile.Name())
-	p, err := StartProc(def, logFile)
+	p, err := StartProc(def, logFile, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -33,7 +33,8 @@
         }
       },
       "definition_hash": "sha256:abc",
-      "desired_state": "running"
+      "desired_state": "running",
+      "token_tracking": "runtime"
     }
   ]
 }

@@ -11,6 +11,7 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PORT=8095
 APP_PORT=8123
 NTFY_PORT=8971
+LLM_PORT=8977
 BASE="http://127.0.0.1:$PORT"
 TMP="$(mktemp -d)"
 HUB_DIR="$TMP/pb_data"
@@ -87,12 +88,36 @@ ENROLL_TOKEN=$(auth_curl -X POST "$BASE/api/bb/enroll-tokens" | jsonval '["token
 export BREAKERBOX_STATE_DIR="$AGENT_DIR"
 "$TMP/agent" enroll --hub "$BASE" --token "$ENROLL_TOKEN" --name e2e-host | grep -q enrolled || fail "agent enroll"
 
+log "starting fake anthropic upstream on :$LLM_PORT"
+cat > "$TMP/fake_llm.py" <<'EOF'
+import http.server, json, sys
+class H(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        _ = self.rfile.read(int(self.headers.get("Content-Length", 0)))
+        body = json.dumps({
+            "id": "msg_e2e_proxy_1", "model": "claude-fable-5", "type": "message",
+            "content": [{"type": "text", "text": "hello from fake upstream"}],
+            "usage": {"input_tokens": 11, "output_tokens": 7,
+                      "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0},
+        }).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *a): pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+EOF
+python3 "$TMP/fake_llm.py" "$LLM_PORT" &
+
 log "starting agent daemon"
 # Agent runs with a fixture HOME so tokenwatch reads controlled transcripts
 # (created later in the token scenario), not this machine's real ~/.claude.
+# The proxy upstream override points runtime metering at the fake provider.
 FAKEHOME="$TMP/fakehome"
 mkdir -p "$FAKEHOME"
-HOME="$FAKEHOME" "$TMP/agent" run >"$TMP/agent.log" 2>&1 &
+HOME="$FAKEHOME" BREAKERBOX_UPSTREAM_ANTHROPIC="http://127.0.0.1:$LLM_PORT" \
+  "$TMP/agent" run >"$TMP/agent.log" 2>&1 &
 AGENT_PID=$!
 wait_until 15 "system online" bash -c \
   "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/systems/records' | grep -q '\"status\":\"online\"'"
@@ -154,7 +179,8 @@ log "agent crash -> resurrect with orphan reap"
 kill -9 "$AGENT_PID"
 sleep 1
 curl -sf "http://127.0.0.1:$APP_PORT/health" >/dev/null || fail "orphan app should still be serving after agent death"
-HOME="$FAKEHOME" "$TMP/agent" run >>"$TMP/agent.log" 2>&1 &
+HOME="$FAKEHOME" BREAKERBOX_UPSTREAM_ANTHROPIC="http://127.0.0.1:$LLM_PORT" \
+  "$TMP/agent" run >>"$TMP/agent.log" 2>&1 &
 AGENT_PID=$!
 wait_until 20 "system back online" bash -c \
   "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/systems/records' | grep -q '\"status\":\"online\"'"
@@ -263,6 +289,35 @@ cat >> "$CLAUDE_DIR/sess.jsonl" <<EOF
 EOF
 wait_until 40 "spend threshold ntfy alert" bash -c "grep -q 'spend' '$TMP/ntfy.log'"
 log "spend alert verified"
+
+log "runtime proxy: metered app -> attributed runtime_proxy row"
+LLM_APP_RESP=$(auth_curl -X POST "$BASE/api/bb/apps" -H 'Content-Type: application/json' -d "{
+  \"system\": \"$SYS_ID\",
+  \"definition\": {
+    \"schema_version\": 1, \"name\": \"e2e-llm-app\", \"kind\": \"process\",
+    \"cmd\": \"$TMP/testapp\", \"args\": [\"-llm-call\"]
+  }}")
+LLM_APP_ID=$(echo "$LLM_APP_RESP" | jsonval '["app_id"]')
+"$TMP/agent" apps approve "$LLM_APP_ID" | grep -q queued || fail "approve llm app"
+wait_until 20 "llm app approved" bash -c \
+  "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/apps/records/$LLM_APP_ID' | grep -q '\"approval\":\"approved\"'"
+auth_curl -X PATCH "$BASE/api/collections/apps/records/$LLM_APP_ID" \
+  -H 'Content-Type: application/json' -d '{"token_tracking":"runtime"}' >/dev/null
+sleep 1 # app_sync propagation
+send_cmd "$LLM_APP_ID" start >/dev/null
+wait_status "$LLM_APP_ID" running "llm app running"
+wait_until 30 "runtime_proxy row for llm app" bash -c \
+  "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/token_usage/records?filter=app=\"'$LLM_APP_ID'\"' | grep -q '\"source\":\"runtime_proxy\"'"
+PROXY_ROW=$(auth_curl "$BASE/api/collections/token_usage/records?filter=app=\"$LLM_APP_ID\"")
+echo "$PROXY_ROW" | grep -q '"dedup_key":"proxy:msg_e2e_proxy_1"' || fail "proxy dedup key wrong"
+# claude-fable-5: 11*1e-5 + 7*5e-5 = 0.00046
+echo "$PROXY_ROW" | python3 -c '
+import sys, json
+rows = json.load(sys.stdin)["items"]
+assert any(abs(r["cost_usd"] - 0.00046) < 1e-9 for r in rows), rows
+' || fail "proxy row cost wrong"
+send_cmd "$LLM_APP_ID" stop >/dev/null
+log "runtime proxy metering verified (\$0.00046, attributed via env injection)"
 
 log "waiting for a metrics cycle (30s interval)"
 wait_until 45 "system metrics rows" bash -c \

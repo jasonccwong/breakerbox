@@ -16,6 +16,7 @@ import (
 	"github.com/breakerbox/breakerbox/agent/internal/collector"
 	"github.com/breakerbox/breakerbox/agent/internal/dockerapp"
 	"github.com/breakerbox/breakerbox/agent/internal/supervisor"
+	"github.com/breakerbox/breakerbox/agent/internal/tokenproxy"
 	"github.com/breakerbox/breakerbox/agent/internal/tokenwatch"
 	"github.com/breakerbox/breakerbox/agent/internal/transport"
 	"github.com/breakerbox/breakerbox/pkg/protocol"
@@ -45,6 +46,8 @@ type Daemon struct {
 	metricsBuf   []protocol.MetricsBatch       // buffered while offline, bounded
 	dockerStatus map[string]protocol.AppStatus // container app ID -> last seen status
 	logStreams   map[string]context.CancelFunc // stream ID -> stop that stream
+	proxy        *tokenproxy.Proxy             // nil when the proxy failed to start
+	proxyRowsBuf []protocol.TokenUsageRow      // buffered while offline, bounded
 
 	// preApproved holds definition hashes imported locally via
 	// `apps import` whose hub-assigned IDs haven't arrived yet. When the
@@ -108,6 +111,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.spoolLoop(ctx)
 	go d.dockerLoop(ctx)
 	go tokenwatch.New(d.store.Dir, d.resolveAppByCwd, d.emitTokenRows).Run(ctx)
+
+	// Runtime metering proxy: failure is non-fatal (apps with token_tracking
+	// = runtime just run unmetered, with a warning).
+	if proxy, err := tokenproxy.Start(d.queueProxyRows); err != nil {
+		slog.Warn("runtime token proxy failed to start; runtime metering disabled", "err", err)
+	} else {
+		d.mu.Lock()
+		d.proxy = proxy
+		d.mu.Unlock()
+		defer proxy.Stop()
+	}
 
 	var backoff transport.Backoff
 	for ctx.Err() == nil {
@@ -250,8 +264,11 @@ func (d *Daemon) applyAppSync(sync protocol.AppSync) {
 		seen[spec.ID] = true
 		local, exists := d.state.Apps[spec.ID]
 		if exists && local.Hash == spec.DefinitionHash {
-			if local.DesiredState != spec.DesiredState {
+			if local.DesiredState != spec.DesiredState || local.TokenTracking != spec.TokenTracking {
 				local.DesiredState = spec.DesiredState
+				// Note: a token_tracking change applies on next app start —
+				// env vars cannot be injected into a running process.
+				local.TokenTracking = spec.TokenTracking
 				d.state.Apps[spec.ID] = local
 				changed = true
 			}
@@ -272,10 +289,11 @@ func (d *Daemon) applyAppSync(sync protocol.AppSync) {
 			slog.Info("definition changed; approval reset to pending", "app", spec.ID, "name", spec.Definition.Name)
 		}
 		d.state.Apps[spec.ID] = appconfig.AppState{
-			Definition:   spec.Definition,
-			Hash:         spec.DefinitionHash,
-			Approval:     approval,
-			DesiredState: spec.DesiredState,
+			Definition:    spec.Definition,
+			Hash:          spec.DefinitionHash,
+			Approval:      approval,
+			DesiredState:  spec.DesiredState,
+			TokenTracking: spec.TokenTracking,
 		}
 		changed = true
 		go d.send(protocol.TypeApprovalEvent, protocol.ApprovalEvent{

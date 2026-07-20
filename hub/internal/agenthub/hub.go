@@ -53,6 +53,17 @@ func Register(pb core.App) *Hub {
 		return se.Next()
 	})
 
+	// Client PATCHed an apps record (definition edit, token_tracking toggle):
+	// push fresh authoritative state to the agent. Request-level hook only —
+	// internal saves (status updates from app_event) must not re-sync.
+	pb.OnRecordUpdateRequest("apps").BindFunc(func(e *core.RecordRequestEvent) error {
+		if err := e.Next(); err != nil {
+			return err
+		}
+		h.SyncSystem(e.Record.GetString("system"))
+		return nil
+	})
+
 	// Client created a command record -> validate done by hooks in the
 	// commands package; here we dispatch to the live agent.
 	pb.OnRecordAfterCreateSuccess("commands").BindFunc(func(e *core.RecordEvent) error {
@@ -247,6 +258,7 @@ func (h *Hub) sendAppSync(c *conn) error {
 			Definition:     def,
 			DefinitionHash: rec.GetString("definition_hash"),
 			DesiredState:   protocol.DesiredState(rec.GetString("desired_state")),
+			TokenTracking:  rec.GetString("token_tracking"),
 		})
 	}
 	return c.send(protocol.TypeAppSync, sync)

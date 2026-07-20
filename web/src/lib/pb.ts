@@ -55,6 +55,7 @@ export interface AppRecord {
   status: AppStatus;
   pid: number;
   ports: { proto: string; port: number }[] | null;
+  token_tracking: "off" | "dev" | "runtime";
 }
 
 export interface SystemMetricRecord {

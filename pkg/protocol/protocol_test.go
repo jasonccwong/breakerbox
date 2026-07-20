@@ -37,6 +37,7 @@ func TestGoldenWireFormat(t *testing.T) {
 				RestartPolicy: &RestartPolicy{MaxRestarts: 15, MinUptimeS: 1, BackoffMaxS: 60},
 			},
 			DefinitionHash: "sha256:abc", DesiredState: DesiredRunning,
+			TokenTracking:  "runtime",
 		}}},
 		"cmd":        Cmd{CmdID: "c1", AppID: "app1", Verb: VerbRestart, DefinitionHash: "sha256:abc"},
 		"cmd_ack":    CmdAck{CmdID: "c1"},
