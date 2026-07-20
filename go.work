@@ -1,0 +1,8 @@
+go 1.26
+
+use (
+	./pkg/protocol
+	./hub
+	./agent
+	./cmd/testapp
+)

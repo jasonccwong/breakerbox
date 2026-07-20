@@ -1,0 +1,6 @@
+{
+  "cmd_id": "c1",
+  "app_id": "app1",
+  "verb": "restart",
+  "definition_hash": "sha256:abc"
+}

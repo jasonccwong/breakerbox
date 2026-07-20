@@ -1,0 +1,11 @@
+{
+  "name": "@breakerbox/api-client",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "pocketbase": "^0.26.0"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "app_id": "app1",
+  "status": "stopped",
+  "exit_code": 137,
+  "restart_count": 3,
+  "ports": [
+    {
+      "proto": "tcp",
+      "port": 3000
+    }
+  ]
+}

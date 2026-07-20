@@ -1,0 +1,39 @@
+{
+  "apps": [
+    {
+      "id": "app1",
+      "definition": {
+        "schema_version": 1,
+        "name": "demo",
+        "kind": "process",
+        "cmd": "npm",
+        "args": [
+          "run",
+          "dev"
+        ],
+        "cwd": "/srv/demo",
+        "env": {
+          "PORT": "3000"
+        },
+        "ports": [
+          3000
+        ],
+        "health_check": {
+          "url": "http://localhost:3000/health",
+          "timeout_s": 5
+        },
+        "stop": {
+          "signal": "SIGTERM",
+          "timeout_s": 10
+        },
+        "restart_policy": {
+          "max_restarts": 15,
+          "min_uptime_s": 1,
+          "backoff_max_s": 60
+        }
+      },
+      "definition_hash": "sha256:abc",
+      "desired_state": "running"
+    }
+  ]
+}

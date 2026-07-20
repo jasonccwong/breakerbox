@@ -1,0 +1,24 @@
+# Binaries and build output
+/bin/
+/dist/
+hub/internal/webassets/dist/*
+!hub/internal/webassets/dist/.gitkeep
+web/dist/
+node_modules/
+
+# PocketBase data
+pb_data/
+*.db
+*.db-shm
+*.db-wal
+
+# OS noise
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+
+# Env
+.env
+.env.local

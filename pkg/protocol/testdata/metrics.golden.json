@@ -1,0 +1,27 @@
+{
+  "host": [
+    {
+      "ts": 1737300000123,
+      "cpu_pct": 12.5,
+      "mem_pct": 61.2,
+      "mem_used": 10515804160,
+      "disk_pct": 71,
+      "net_sent": 123456,
+      "net_recv": 654321
+    }
+  ],
+  "apps": [
+    {
+      "ts": 1737300000123,
+      "app_id": "app1",
+      "cpu_pct": 3.2,
+      "mem_rss": 104857600,
+      "ports": [
+        {
+          "proto": "tcp",
+          "port": 3000
+        }
+      ]
+    }
+  ]
+}

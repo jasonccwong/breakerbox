@@ -1,0 +1,16 @@
+{
+  "rows": [
+    {
+      "dedup_key": "msg_01:req_01",
+      "app_id": "app1",
+      "source": "claude_code",
+      "model": "claude-fable-5",
+      "input_tokens": 2,
+      "output_tokens": 245,
+      "cache_creation_tokens": 10465,
+      "cache_read_tokens": 28445,
+      "session_id": "43426d4d",
+      "occurred_at_ms": 1737300000123
+    }
+  ]
+}

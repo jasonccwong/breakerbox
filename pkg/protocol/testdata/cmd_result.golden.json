@@ -1,0 +1,6 @@
+{
+  "cmd_id": "c1",
+  "ok": false,
+  "error": "start failed",
+  "detail": "exit status 1"
+}

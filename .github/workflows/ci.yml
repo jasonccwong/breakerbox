@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Go (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            hub/go.sum
+            agent/go.sum
+      - name: Vet
+        run: |
+          cd pkg/protocol && go vet ./... && cd ..
+          cd ../hub && go vet ./... && cd ..
+          cd agent && go vet ./...
+        shell: bash
+      - name: Test protocol
+        run: cd pkg/protocol && go test ./...
+        shell: bash
+      - name: Test agent
+        run: cd agent && go test ./...
+        shell: bash
+      - name: Test hub
+        # PB test harness needs unix sockets/timings that are flaky on
+        # windows runners; hub itself ships for all OSes but only serves
+        # from linux/macos in practice for now.
+        if: matrix.os != 'windows-latest'
+        run: cd hub && go test ./...
+        shell: bash
+      - name: Build binaries
+        run: |
+          cd agent && go build . && cd ..
+          cd hub && go build . && cd ..
+          cd cmd/testapp && go build .
+        shell: bash
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter web build
+      - run: pnpm --filter web exec tsc --noEmit
