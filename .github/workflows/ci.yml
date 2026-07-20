@@ -23,9 +23,9 @@ jobs:
             agent/go.sum
       - name: Vet
         run: |
-          cd pkg/protocol && go vet ./... && cd ..
-          cd ../hub && go vet ./... && cd ..
-          cd agent && go vet ./...
+          (cd pkg/protocol && go vet ./...)
+          (cd hub && go vet ./...)
+          (cd agent && go vet ./...)
         shell: bash
       - name: Test protocol
         run: cd pkg/protocol && go test ./...
@@ -42,9 +42,9 @@ jobs:
         shell: bash
       - name: Build binaries
         run: |
-          cd agent && go build . && cd ..
-          cd hub && go build . && cd ..
-          cd cmd/testapp && go build .
+          (cd agent && go build .)
+          (cd hub && go build .)
+          (cd cmd/testapp && go build .)
         shell: bash
 
   web:
@@ -52,9 +52,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # version comes from the packageManager field in package.json
       - uses: pnpm/action-setup@v4
-        with:
-          version: 9
       - uses: actions/setup-node@v4
         with:
           node-version: 22

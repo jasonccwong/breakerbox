@@ -32,6 +32,7 @@ web:
 webassets: web
 	rm -rf hub/internal/webassets/dist
 	cp -r web/dist hub/internal/webassets/dist
+	@touch hub/internal/webassets/dist/.gitkeep # keep the embed dir tracked in git
 
 # --- Dev --------------------------------------------------------------------
 
