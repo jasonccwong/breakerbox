@@ -22,13 +22,14 @@ const maxClockSkew = 5 * time.Minute
 
 // Hub wires the agent WebSocket plane into a PocketBase app.
 type Hub struct {
-	app core.App
-	reg *registry
+	app  core.App
+	reg  *registry
+	logs *logBroker
 }
 
 // Register attaches the agent WS route and the command-dispatch hook.
 func Register(pb core.App) *Hub {
-	h := &Hub{app: pb, reg: newRegistry()}
+	h := &Hub{app: pb, reg: newRegistry(), logs: newLogBroker()}
 
 	pb.OnServe().BindFunc(func(se *core.ServeEvent) error {
 		se.Router.GET("/api/bb/agent/ws", func(e *core.RequestEvent) error {
@@ -38,6 +39,7 @@ func Register(pb core.App) *Hub {
 		se.Router.GET("/api/bb/health", func(e *core.RequestEvent) error {
 			return e.JSON(http.StatusOK, map[string]string{"status": "ok"})
 		})
+		h.registerLogRoute(se)
 		return se.Next()
 	})
 
@@ -164,6 +166,13 @@ func (h *Hub) handleFrame(c *conn, system *core.Record, env protocol.Envelope) e
 			return err
 		}
 		return h.onAppRegister(c, reg)
+	case protocol.TypeLogChunk:
+		var chunk protocol.LogChunk
+		if err := json.Unmarshal(env.D, &chunk); err != nil {
+			return err
+		}
+		h.logs.deliver(chunk)
+		return nil
 	case protocol.TypeApprovalEvent:
 		var ev protocol.ApprovalEvent
 		if err := json.Unmarshal(env.D, &ev); err != nil {

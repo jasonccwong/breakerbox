@@ -2,8 +2,17 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pb, sendCommand } from "../lib/pb";
-import type { AppMetricRecord, AppRecord } from "../lib/pb";
+import type { AppRecord } from "../lib/pb";
 import { StatusPill, Toggle } from "../components/ui";
+import {
+  ChartCard,
+  LineChart,
+  RangePicker,
+  fmtBytes,
+  seriesOf,
+  useMetricHistory,
+  type RangeKey,
+} from "../components/charts";
 
 export default function AppDetail() {
   const { id } = useParams<{ id: string }>();
@@ -15,21 +24,13 @@ export default function AppDetail() {
     if (!pb.authStore.isValid) nav("/login");
   }, [nav]);
 
+  const [range, setRange] = useState<RangeKey>("1h");
   const { data: app } = useQuery({
     queryKey: ["app", id],
     queryFn: () => pb.collection("apps").getOne<AppRecord>(id!),
     enabled: !!id,
   });
-  const { data: metrics } = useQuery({
-    queryKey: ["app_metrics", id],
-    queryFn: () =>
-      pb.collection("app_metrics").getList<AppMetricRecord>(1, 60, {
-        filter: `app = "${id}" && type = "1m"`,
-        sort: "-created",
-      }),
-    enabled: !!id,
-    refetchInterval: 15000,
-  });
+  const { data: metrics } = useMetricHistory("app_metrics", "app", id, range);
 
   useEffect(() => {
     if (!id) return;
@@ -44,7 +45,8 @@ export default function AppDetail() {
   if (!app) return <div className="p-8 text-zinc-500">Loading…</div>;
 
   const running = app.status === "running" || app.status === "starting";
-  const samples = [...(metrics?.items ?? [])].reverse();
+  const cpu = seriesOf(metrics, "cpu");
+  const mem = seriesOf(metrics, "mem_rss");
 
   async function act(verb: "start" | "stop" | "restart") {
     setBusy(true);
@@ -93,21 +95,23 @@ export default function AppDetail() {
         </div>
       )}
 
-      <section className="mt-8 grid grid-cols-2 gap-4">
-        <MetricCard
-          title="CPU"
-          unit="%"
-          values={samples.map((s) => s.cpu)}
-          latest={samples.at(-1)?.cpu}
-          fmt={(v) => v.toFixed(1)}
-        />
-        <MetricCard
-          title="Memory"
-          unit="MB"
-          values={samples.map((s) => s.mem_rss / 1048576)}
-          latest={(samples.at(-1)?.mem_rss ?? 0) / 1048576}
-          fmt={(v) => v.toFixed(0)}
-        />
+      <section className="mt-8">
+        <div className="mb-3 flex justify-end">
+          <RangePicker value={range} onChange={setRange} />
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <ChartCard title="CPU" latest={cpu.at(-1) ? cpu.at(-1)!.v.toFixed(1) : "—"} unit="%">
+            <LineChart points={cpu} unit="%" />
+          </ChartCard>
+          <ChartCard title="Memory" latest={mem.at(-1) ? fmtBytes(mem.at(-1)!.v) : "—"} unit="B">
+            <LineChart points={mem} unit="B" fmt={fmtBytes} color="rgb(96 165 250)" />
+          </ChartCard>
+        </div>
+      </section>
+
+      <section className="mt-8">
+        <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-zinc-400">Logs</h2>
+        <LogViewer appId={app.id} />
       </section>
 
       <section className="mt-8">
@@ -121,45 +125,68 @@ export default function AppDetail() {
   );
 }
 
-function MetricCard({
-  title,
-  unit,
-  values,
-  latest,
-  fmt,
-}: {
-  title: string;
-  unit: string;
-  values: number[];
-  latest?: number;
-  fmt: (v: number) => string;
-}) {
+const MAX_LOG_LINES = 2000;
+
+function LogViewer({ appId }: { appId: string }) {
+  const [lines, setLines] = useState<string[]>([]);
+  const [state, setState] = useState<"connecting" | "live" | "ended" | "error">("connecting");
+  const [paused, setPaused] = useState(false);
+  const [box, setBox] = useState<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setLines([]);
+    setState("connecting");
+    const url = `/api/bb/apps/${appId}/logs?tail=200&token=${encodeURIComponent(pb.authStore.token)}`;
+    const es = new EventSource(url);
+    es.onopen = () => setState("live");
+    es.onmessage = (ev) => {
+      try {
+        const batch = JSON.parse(ev.data) as string[];
+        setLines((prev) => {
+          const next = prev.concat(batch);
+          return next.length > MAX_LOG_LINES ? next.slice(next.length - MAX_LOG_LINES) : next;
+        });
+      } catch {
+        /* ignore malformed frames */
+      }
+    };
+    es.addEventListener("eof", () => {
+      setState("ended");
+      es.close();
+    });
+    es.onerror = () => {
+      // EventSource retries transient errors itself; a closed stream after
+      // eof lands here too, so only flag real failures while connecting.
+      setState((s) => (s === "connecting" ? "error" : s));
+    };
+    return () => es.close();
+  }, [appId]);
+
+  useEffect(() => {
+    if (box && !paused) box.scrollTop = box.scrollHeight;
+  }, [lines, box, paused]);
+
   return (
-    <div className="rounded-xl border border-zinc-800 bg-zinc-900/50 p-4">
-      <div className="flex items-baseline justify-between">
-        <span className="text-sm text-zinc-400">{title}</span>
-        <span className="text-lg font-semibold">
-          {latest !== undefined && values.length > 0 ? fmt(latest) : "—"}
-          <span className="ml-1 text-xs text-zinc-500">{unit}</span>
+    <div className="rounded-lg border border-zinc-800 bg-zinc-950">
+      <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-1.5 text-xs text-zinc-500">
+        <span>
+          {state === "live" && <span className="text-emerald-500">● streaming</span>}
+          {state === "connecting" && "connecting…"}
+          {state === "ended" && "stream ended"}
+          {state === "error" && <span className="text-red-400">agent offline or stream unavailable</span>}
         </span>
+        <button onClick={() => setPaused((p) => !p)} className="rounded px-2 py-0.5 hover:bg-zinc-800">
+          {paused ? "▶ resume scroll" : "⏸ pause scroll"}
+        </button>
       </div>
-      <Sparkline values={values} />
+      <div ref={setBox} className="h-72 overflow-y-auto p-3 font-mono text-xs leading-5 text-zinc-300">
+        {lines.length === 0 ? (
+          <span className="text-zinc-600">no output yet</span>
+        ) : (
+          lines.map((l, i) => <div key={i} className="whitespace-pre-wrap break-all">{l}</div>)
+        )}
+      </div>
     </div>
   );
 }
 
-function Sparkline({ values }: { values: number[] }) {
-  if (values.length < 2)
-    return <div className="mt-3 h-12 text-center text-xs leading-[3rem] text-zinc-600">collecting…</div>;
-  const w = 240;
-  const h = 48;
-  const max = Math.max(...values, 0.001);
-  const pts = values
-    .map((v, i) => `${((i / (values.length - 1)) * w).toFixed(1)},${(h - (v / max) * (h - 4) - 2).toFixed(1)}`)
-    .join(" ");
-  return (
-    <svg viewBox={`0 0 ${w} ${h}`} className="mt-3 h-12 w-full">
-      <polyline points={pts} fill="none" stroke="rgb(245 158 11)" strokeWidth="1.5" />
-    </svg>
-  );
-}

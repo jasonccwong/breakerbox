@@ -4,12 +4,14 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { pb, sendCommand } from "./lib/pb";
 import type { AppRecord, SystemRecord } from "./lib/pb";
 import { StatusPill, Toggle, Modal, CopyBlock } from "./components/ui";
+import { SystemHistory } from "./components/charts";
 import { generateAppDefPrompt } from "./lib/prompt";
 
 export default function App() {
   const nav = useNavigate();
   const qc = useQueryClient();
   const [enrollOpen, setEnrollOpen] = useState(false);
+  const [alertsOpen, setAlertsOpen] = useState(false);
   const [addAppSystem, setAddAppSystem] = useState<SystemRecord | null>(null);
 
   useEffect(() => {
@@ -52,6 +54,9 @@ export default function App() {
           >
             + Add system
           </button>
+          <button onClick={() => setAlertsOpen(true)} className="text-sm text-zinc-400 hover:text-zinc-200">
+            🔔 Alerts
+          </button>
           <button
             onClick={() => {
               pb.authStore.clear();
@@ -88,6 +93,7 @@ export default function App() {
       </div>
 
       {enrollOpen && <EnrollModal onClose={() => setEnrollOpen(false)} />}
+      {alertsOpen && <AlertsModal onClose={() => setAlertsOpen(false)} />}
       {addAppSystem && <AddAppModal system={addAppSystem} onClose={() => setAddAppSystem(null)} />}
     </div>
   );
@@ -102,6 +108,7 @@ function SystemCard({
   apps: AppRecord[];
   onAddApp: () => void;
 }) {
+  const [historyOpen, setHistoryOpen] = useState(false);
   return (
     <section className="rounded-xl border border-zinc-800 bg-zinc-900/50">
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
@@ -112,10 +119,20 @@ function SystemCard({
             {system.os}/{system.arch} {system.hostname && `· ${system.hostname}`}
           </span>
         </div>
-        <button onClick={onAddApp} className="text-sm text-amber-400 hover:text-amber-300">
-          + Add app
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={() => setHistoryOpen(true)} className="text-sm text-zinc-400 hover:text-zinc-200">
+            ⤢ History
+          </button>
+          <button onClick={onAddApp} className="text-sm text-amber-400 hover:text-amber-300">
+            + Add app
+          </button>
+        </div>
       </div>
+      {historyOpen && (
+        <Modal title={`${system.name} — host metrics`} onClose={() => setHistoryOpen(false)} wide>
+          <SystemHistory systemId={system.id} />
+        </Modal>
+      )}
       {apps.length === 0 ? (
         <p className="px-4 py-6 text-sm text-zinc-500">No apps registered on this system.</p>
       ) : (
@@ -173,6 +190,103 @@ function AppRow({ app }: { app: AppRecord }) {
         onChange={toggle}
       />
     </li>
+  );
+}
+
+interface SettingsRecord {
+  id: string;
+  ntfy_endpoint: string;
+  notify_app_errors: boolean;
+  notify_system_offline: boolean;
+}
+
+function AlertsModal({ onClose }: { onClose: () => void }) {
+  const [rec, setRec] = useState<SettingsRecord | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
+
+  useEffect(() => {
+    pb.collection("settings")
+      .getList<SettingsRecord>(1, 1)
+      .then((r) => setRec(r.items[0] ?? null))
+      .catch(() => {});
+  }, []);
+
+  async function save(patch: Partial<SettingsRecord>) {
+    if (!rec) return;
+    const next = { ...rec, ...patch };
+    setRec(next);
+    setSaved(false);
+    await pb.collection("settings").update(rec.id, patch);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  }
+
+  async function sendTest() {
+    setTestResult(null);
+    try {
+      await pb.send("/api/bb/notify/test", { method: "POST" });
+      setTestResult("✓ sent — check your ntfy app");
+    } catch (e) {
+      setTestResult(`✗ ${e instanceof Error ? e.message : "failed"}`);
+    }
+  }
+
+  if (!rec)
+    return (
+      <Modal title="Alerts" onClose={onClose}>
+        <p className="text-sm text-zinc-500">Loading…</p>
+      </Modal>
+    );
+
+  return (
+    <Modal title="Alerts (ntfy)" onClose={onClose}>
+      <p className="mb-4 text-sm text-zinc-400">
+        BreakerBox pushes alerts through{" "}
+        <a href="https://ntfy.sh" target="_blank" rel="noreferrer" className="text-amber-400 hover:underline">
+          ntfy
+        </a>
+        : install the ntfy app, subscribe to a topic, and paste the full topic URL here. Self-hosted ntfy
+        servers work the same way.
+      </p>
+      <label className="mb-1 block text-xs font-medium text-zinc-400">Topic URL</label>
+      <input
+        value={rec.ntfy_endpoint}
+        onChange={(e) => setRec({ ...rec, ntfy_endpoint: e.target.value })}
+        onBlur={() => save({ ntfy_endpoint: rec.ntfy_endpoint.trim() })}
+        placeholder="https://ntfy.sh/my-breakerbox-alerts"
+        className="mb-4 w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm outline-none focus:border-amber-500"
+      />
+      <div className="mb-4 space-y-2">
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={rec.notify_app_errors}
+            onChange={(e) => save({ notify_app_errors: e.target.checked })}
+          />
+          App failures &amp; crash loops
+        </label>
+        <label className="flex items-center gap-2 text-sm text-zinc-300">
+          <input
+            type="checkbox"
+            checked={rec.notify_system_offline}
+            onChange={(e) => save({ notify_system_offline: e.target.checked })}
+          />
+          System offline (after 2&nbsp;min grace)
+        </label>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          onClick={sendTest}
+          disabled={!rec.ntfy_endpoint}
+          className="rounded-lg bg-zinc-800 px-3 py-1.5 text-sm hover:bg-zinc-700 disabled:opacity-40"
+        >
+          Send test notification
+        </button>
+        {saved && <span className="text-xs text-emerald-500">saved</span>}
+        {testResult && <span className="text-xs text-zinc-400">{testResult}</span>}
+      </div>
+    </Modal>
   );
 }
 

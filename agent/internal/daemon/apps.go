@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/breakerbox/breakerbox/agent/internal/supervisor"
 	"github.com/breakerbox/breakerbox/pkg/protocol"
@@ -30,8 +31,8 @@ func (d *Daemon) startApp(appID string) error {
 	if app.Approval != protocol.ApprovalApproved {
 		return fmt.Errorf("app not approved on this host")
 	}
-	if app.Definition.Kind != "" && app.Definition.Kind != protocol.KindProcess {
-		return fmt.Errorf("kind %q lands in Phase 2 (docker/compose)", app.Definition.Kind)
+	if isDockerKind(app.Definition.Kind) {
+		return d.startDockerApp(appID, app.Definition)
 	}
 
 	logFile, err := d.openLog(appID)
@@ -47,6 +48,14 @@ func (d *Daemon) startApp(appID string) error {
 
 	d.mu.Lock()
 	d.procs[appID] = p
+	d.startTimes[appID] = time.Now()
+	// Remember the tree so a restarted agent can reap orphans (see Run).
+	if a, ok := d.state.Apps[appID]; ok {
+		a.LastPID = p.PID()
+		a.LastCmdBase = app.Definition.Cmd
+		d.state.Apps[appID] = a
+		_ = d.store.Save(d.state)
+	}
 	d.mu.Unlock()
 	d.sendEvent(appID, protocol.StatusRunning, p.PID(), nil)
 	slog.Info("app started", "app", appID, "name", app.Definition.Name, "pid", p.PID())
@@ -65,18 +74,25 @@ func (d *Daemon) startApp(appID string) error {
 		d.mu.Unlock()
 		if current {
 			slog.Info("app exited", "app", appID, "exit_code", code)
-			d.sendEvent(appID, protocol.StatusStopped, 0, &code)
+			d.handleUnexpectedExit(appID, code)
 		}
 	}()
 	return nil
 }
 
-// stopApp gracefully stops a running app (no-op when already stopped).
+// stopApp gracefully stops a running app (no-op when already stopped). Any
+// pending crash-restart is canceled first — a user stop always wins.
 func (d *Daemon) stopApp(appID string) error {
+	d.cancelRestart(appID)
 	d.mu.Lock()
+	app, known := d.state.Apps[appID]
 	p, ok := d.procs[appID]
 	delete(d.procs, appID)
+	delete(d.startTimes, appID)
 	d.mu.Unlock()
+	if known && isDockerKind(app.Definition.Kind) {
+		return d.stopDockerApp(appID, app.Definition)
+	}
 	if !ok {
 		return nil
 	}
@@ -84,6 +100,13 @@ func (d *Daemon) stopApp(appID string) error {
 		d.sendEvent(appID, protocol.StatusErrored, 0, nil)
 		return err
 	}
+	d.mu.Lock()
+	if a, ok := d.state.Apps[appID]; ok && a.LastPID != 0 {
+		a.LastPID, a.LastCmdBase = 0, ""
+		d.state.Apps[appID] = a
+		_ = d.store.Save(d.state)
+	}
+	d.mu.Unlock()
 	d.sendEvent(appID, protocol.StatusStopped, 0, nil)
 	return nil
 }
@@ -97,12 +120,18 @@ func (d *Daemon) sendEvent(appID string, status protocol.AppStatus, pid int, exi
 	d.send(protocol.TypeAppEvent, ev)
 }
 
-// openLog opens the app's rotating log sink (plain file in Phase 1; ring
-// buffer + rotation in Phase 2).
+// logPath returns the log file for a process app.
+func (d *Daemon) logPath(appID string) string {
+	return filepath.Join(d.store.Dir, "logs", appID+".log")
+}
+
+// openLog opens the app's log sink, rotating first when it has grown past the
+// cap (one .1 generation kept).
 func (d *Daemon) openLog(appID string) (*os.File, error) {
-	dir := filepath.Join(d.store.Dir, "logs")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	path := d.logPath(appID)
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	return os.OpenFile(filepath.Join(dir, appID+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	rotateLogIfNeeded(path)
+	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 }

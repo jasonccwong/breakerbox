@@ -43,6 +43,12 @@ type AppState struct {
 	Hash         string                 `json:"hash"`
 	Approval     protocol.Approval      `json:"approval"`
 	DesiredState protocol.DesiredState  `json:"desired_state"`
+	// LastPID/LastCmdBase identify the process tree from the previous agent
+	// run so a restarted agent can clean up orphans before resurrecting
+	// (children survive an agent crash on unix). CmdBase guards against PID
+	// reuse killing an innocent process.
+	LastPID     int    `json:"last_pid,omitempty"`
+	LastCmdBase string `json:"last_cmd_base,omitempty"`
 }
 
 // State is everything the agent persists.

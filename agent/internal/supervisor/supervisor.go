@@ -8,11 +8,29 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	gops "github.com/shirou/gopsutil/v4/process"
+
 	"github.com/breakerbox/breakerbox/pkg/protocol"
 )
+
+// processNameMatches reports whether pid's executable base name equals want
+// (used to avoid PID-reuse false positives when reaping orphans).
+func processNameMatches(pid int, want string) bool {
+	p, err := gops.NewProcess(int32(pid))
+	if err != nil {
+		return false
+	}
+	name, err := p.Name()
+	if err != nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Base(name), filepath.Base(want))
+}
 
 // defaultStopTimeout is used when a definition has no stop.timeout_s.
 const defaultStopTimeout = 10 * time.Second
@@ -85,7 +103,20 @@ func (p *Proc) Alive() bool {
 	}
 }
 
-// Stop performs graceful shutdown of the whole tree: the definition's stop
+// ReapOrphan force-kills a process tree left over from a previous agent run
+// (children survive an agent crash on unix). expectCmdBase guards against PID
+// reuse: the reap is skipped unless the process's executable base name still
+// matches what the agent originally spawned.
+func ReapOrphan(pid int, expectCmdBase string) bool {
+	if pid <= 0 || !processGroupAlive(pid) {
+		return false
+	}
+	if expectCmdBase != "" && !processNameMatches(pid, expectCmdBase) {
+		return false
+	}
+	_ = killTree(pid)
+	return waitTreeGone(pid, 5*time.Second)
+}
 // signal (default SIGTERM) to the process group, then SIGKILL escalation
 // after the stop timeout. It returns once the entire tree is gone.
 func (p *Proc) Stop() error {

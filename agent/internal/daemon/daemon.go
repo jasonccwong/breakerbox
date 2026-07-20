@@ -14,6 +14,7 @@ import (
 
 	"github.com/breakerbox/breakerbox/agent/internal/appconfig"
 	"github.com/breakerbox/breakerbox/agent/internal/collector"
+	"github.com/breakerbox/breakerbox/agent/internal/dockerapp"
 	"github.com/breakerbox/breakerbox/agent/internal/supervisor"
 	"github.com/breakerbox/breakerbox/agent/internal/transport"
 	"github.com/breakerbox/breakerbox/pkg/protocol"
@@ -33,9 +34,16 @@ type Daemon struct {
 	priv  ed25519.PrivateKey
 	col   *collector.Collector
 
-	mu    sync.Mutex
-	procs map[string]*supervisor.Proc // app ID -> running process
-	conn  *transport.Conn             // current connection (nil when offline)
+	docker *dockerapp.Client // nil when no engine socket on this host
+
+	mu           sync.Mutex
+	procs        map[string]*supervisor.Proc  // app ID -> running process
+	conn         *transport.Conn              // current connection (nil when offline)
+	startTimes   map[string]time.Time         // app ID -> last successful start
+	restarts     map[string]*restartState     // app ID -> crash-restart bookkeeping
+	metricsBuf   []protocol.MetricsBatch       // buffered while offline, bounded
+	dockerStatus map[string]protocol.AppStatus // container app ID -> last seen status
+	logStreams   map[string]context.CancelFunc // stream ID -> stop that stream
 
 	// preApproved holds definition hashes imported locally via
 	// `apps import` whose hub-assigned IDs haven't arrived yet. When the
@@ -50,13 +58,21 @@ func New(store *appconfig.Store, priv ed25519.PrivateKey, version string) (*Daem
 	if err != nil {
 		return nil, err
 	}
+	docker, derr := dockerapp.New()
+	if derr != nil {
+		slog.Info("docker capability absent", "reason", derr)
+	}
 	return &Daemon{
-		Version: version,
-		store:   store,
-		state:   st,
-		priv:    priv,
-		col:     collector.New(),
-		procs:   map[string]*supervisor.Proc{},
+		Version:      version,
+		store:        store,
+		state:        st,
+		priv:         priv,
+		col:          collector.New(),
+		docker:       docker,
+		procs:        map[string]*supervisor.Proc{},
+		startTimes:   map[string]time.Time{},
+		restarts:     map[string]*restartState{},
+		dockerStatus: map[string]protocol.AppStatus{},
 	}, nil
 }
 
@@ -67,7 +83,18 @@ func (d *Daemon) Run(ctx context.Context) error {
 		os.Exit(1)
 	}
 
-	// Resurrect apps whose desired state is running.
+	// Reap orphans from a previous agent run (children survive an agent
+	// crash on unix), then resurrect apps whose desired state is running.
+	for id, app := range d.state.Apps {
+		if app.LastPID > 0 && !isDockerKind(app.Definition.Kind) {
+			if supervisor.ReapOrphan(app.LastPID, app.Definition.Cmd) {
+				slog.Info("reaped orphaned process tree from previous run", "app", id, "pid", app.LastPID)
+			}
+			app.LastPID, app.LastCmdBase = 0, ""
+			d.state.Apps[id] = app
+		}
+	}
+	_ = d.store.Save(d.state)
 	for id, app := range d.state.Apps {
 		if app.DesiredState == protocol.DesiredRunning && app.Approval == protocol.ApprovalApproved {
 			if err := d.startApp(id); err != nil {
@@ -78,6 +105,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	go d.metricsLoop(ctx)
 	go d.spoolLoop(ctx)
+	go d.dockerLoop(ctx)
 
 	var backoff transport.Backoff
 	for ctx.Err() == nil {
@@ -105,6 +133,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		d.mu.Lock()
 		d.conn = nil
 		d.mu.Unlock()
+		d.cancelAllLogStreams()
 		slog.Warn("hub connection lost")
 	}
 	return nil
@@ -140,13 +169,20 @@ func (d *Daemon) sendHello(conn *transport.Conn) {
 	}
 	d.mu.Unlock()
 
+	caps := []string{}
+	if d.docker != nil {
+		caps = append(caps, "docker")
+		if dockerapp.ComposeAvailable() {
+			caps = append(caps, "compose")
+		}
+	}
 	_ = conn.Send(protocol.TypeHello, protocol.Hello{
 		AgentVersion:    d.Version,
 		ProtocolVersion: protocol.Version,
 		OS:              runtime.GOOS,
 		Arch:            runtime.GOARCH,
 		Hostname:        hostname,
-		Capabilities:    []string{},
+		Capabilities:    caps,
 		Apps:            digest,
 	})
 }
@@ -175,11 +211,22 @@ func (d *Daemon) handleFrame(env protocol.Envelope) {
 		var sync protocol.AppSync
 		if unmarshal(env.D, &sync) {
 			d.applyAppSync(sync)
+			d.reconcile()
 		}
 	case protocol.TypeCmd:
 		var cmd protocol.Cmd
 		if unmarshal(env.D, &cmd) {
 			go d.execute(cmd)
+		}
+	case protocol.TypeLogFollow:
+		var req protocol.LogFollow
+		if unmarshal(env.D, &req) {
+			d.startLogStream(req)
+		}
+	case protocol.TypeLogCancel:
+		var req protocol.LogCancel
+		if unmarshal(env.D, &req) {
+			d.cancelLogStream(req.StreamID)
 		}
 	case protocol.TypePing:
 		// WebSocket-level pong is handled by the library.
@@ -214,6 +261,11 @@ func (d *Daemon) applyAppSync(sync protocol.AppSync) {
 			// Locally imported definition: the import was the approval.
 			approval = protocol.ApprovalApproved
 			d.preApproved = append(d.preApproved[:i], d.preApproved[i+1:]...)
+		} else if isDockerKind(spec.Definition.Kind) {
+			// Lifecycle verbs against a container the user already created
+			// are inherently host-scoped: the hub can name a container but
+			// cannot inject a command line, so approval is automatic.
+			approval = protocol.ApprovalApproved
 		} else if exists {
 			slog.Info("definition changed; approval reset to pending", "app", spec.ID, "name", spec.Definition.Name)
 		}
@@ -234,6 +286,12 @@ func (d *Daemon) applyAppSync(sync protocol.AppSync) {
 			if p, ok := d.procs[id]; ok {
 				go func(p *supervisor.Proc) { _ = p.Stop() }(p)
 				delete(d.procs, id)
+			}
+			if rs, ok := d.restarts[id]; ok {
+				if rs.timer != nil {
+					rs.timer.Stop()
+				}
+				delete(d.restarts, id)
 			}
 			delete(d.state.Apps, id)
 			changed = true
@@ -281,13 +339,28 @@ func (d *Daemon) execute(cmd protocol.Cmd) {
 		return
 	}
 
+	// Record intent locally so resurrect-on-boot and reconciliation agree
+	// with the hub even if this connection drops right after execution.
+	persistDesired := func(ds protocol.DesiredState) {
+		d.mu.Lock()
+		if a, ok := d.state.Apps[cmd.AppID]; ok && a.DesiredState != ds {
+			a.DesiredState = ds
+			d.state.Apps[cmd.AppID] = a
+			_ = d.store.Save(d.state)
+		}
+		d.mu.Unlock()
+	}
+
 	var err error
 	switch cmd.Verb {
 	case protocol.VerbStart:
+		persistDesired(protocol.DesiredRunning)
 		err = d.startApp(cmd.AppID)
 	case protocol.VerbStop:
+		persistDesired(protocol.DesiredStopped)
 		err = d.stopApp(cmd.AppID)
 	case protocol.VerbRestart:
+		persistDesired(protocol.DesiredRunning)
 		if err = d.stopApp(cmd.AppID); err == nil {
 			err = d.startApp(cmd.AppID)
 		}
