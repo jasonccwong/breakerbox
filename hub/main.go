@@ -14,6 +14,7 @@ import (
 	"github.com/breakerbox/breakerbox/hub/internal/appsapi"
 	"github.com/breakerbox/breakerbox/hub/internal/commands"
 	"github.com/breakerbox/breakerbox/hub/internal/enroll"
+	"github.com/breakerbox/breakerbox/hub/internal/setup"
 	"github.com/breakerbox/breakerbox/hub/internal/webassets"
 	_ "github.com/breakerbox/breakerbox/hub/migrations"
 )
@@ -34,6 +35,7 @@ func main() {
 	enroll.Register(app)
 	commands.Register(app)
 	appsapi.Register(app, hub)
+	setup.Register(app)
 
 	// Serve the embedded web SPA at the root (when a build is embedded).
 	if spa, ok := webassets.Handler(); ok {
