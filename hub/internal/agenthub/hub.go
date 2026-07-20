@@ -158,6 +158,18 @@ func (h *Hub) handleFrame(c *conn, system *core.Record, env protocol.Envelope) e
 		return h.onAppEvent(ev)
 	case protocol.TypeCmdAck, protocol.TypeCmdResult:
 		return h.onCmdUpdate(env)
+	case protocol.TypeAppRegister:
+		var reg protocol.AppRegister
+		if err := json.Unmarshal(env.D, &reg); err != nil {
+			return err
+		}
+		return h.onAppRegister(c, reg)
+	case protocol.TypeApprovalEvent:
+		var ev protocol.ApprovalEvent
+		if err := json.Unmarshal(env.D, &ev); err != nil {
+			return err
+		}
+		return h.onApprovalEvent(ev)
 	default:
 		slog.Debug("ignoring unknown frame type", "type", env.T)
 		return nil

@@ -90,3 +90,11 @@ func (h *Hub) Dispatch(systemID string, cmd protocol.Cmd) error {
 	}
 	return c.send(protocol.TypeCmd, cmd)
 }
+
+// SyncSystem pushes a fresh AppSync to the system's agent if it is connected.
+// A disconnected agent reconciles on its next hello, so this is best-effort.
+func (h *Hub) SyncSystem(systemID string) {
+	if c := h.reg.get(systemID); c != nil {
+		_ = h.sendAppSync(c)
+	}
+}

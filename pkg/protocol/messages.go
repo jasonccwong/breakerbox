@@ -32,6 +32,7 @@ const (
 	TypeLogChunk        = "log_chunk"
 	TypeTokenUsageBatch = "token_usage_batch"
 	TypeApprovalEvent   = "approval_event"
+	TypeAppRegister     = "app_register"
 )
 
 // Message types: hub -> agent.
@@ -192,4 +193,15 @@ type ApprovalEvent struct {
 	AppID          string   `json:"app_id"`
 	Approval       Approval `json:"approval"`
 	DefinitionHash string   `json:"definition_hash"`
+}
+
+// AppRegister asks the hub to create an app record for a definition imported
+// on the host (`breakerbox-agent apps import`). Because the import happened
+// on the machine itself, the definition arrives pre-approved. The hub replies
+// with a fresh AppSync carrying the assigned app ID.
+type AppRegister struct {
+	Definition AppDefinition `json:"definition"`
+	// LocalRef lets the agent correlate the AppSync entry with its spooled
+	// import (matched by definition hash).
+	LocalRef string `json:"local_ref,omitempty"`
 }
