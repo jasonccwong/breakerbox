@@ -6,7 +6,7 @@ BreakerBox is a lightweight, open-source control panel for the apps you run on y
 
 Think **Beszel + Dockge + ccusage in one pane**.
 
-> ⚠️ **Status: alpha, under active development.** Hub + agent (macOS & Linux) + web dashboard work end-to-end today: app on/off switches, native **and Docker/Compose** apps, crash-restart policies, resurrect-on-boot, live log streaming, metric history, and ntfy push alerts. Token tracking and mobile land next. Nothing is stable yet — star/watch to follow along.
+> ⚠️ **Status: alpha, under active development.** Hub + agent (macOS & Linux) + web dashboard + mobile app work end-to-end today: app on/off switches, native **and Docker/Compose** apps, crash-restart policies, resurrect-on-boot, live log streaming, metric history, ntfy push alerts, and **zero-config LLM token tracking** — Claude Code and Codex sessions are priced and attributed to your apps automatically. Windows agent and the runtime token proxy land next. Nothing is stable yet — star/watch to follow along.
 
 ## Why another panel?
 
@@ -65,12 +65,31 @@ Then **+ Add app** → let Claude Code/Codex generate the app definition → app
 it on the host → flip the switch. Hub at home? See [docs/home-hub.md](docs/home-hub.md)
 for Cloudflare Tunnel / Tailscale setups.
 
+## Token tracking
+
+Zero configuration: the agent tails the local transcripts Claude Code and
+Codex already write (`~/.claude/projects`, `~/.codex/sessions`), dedupes
+streaming rewrites, prices every row against the LiteLLM community price
+table, and attributes spend to your apps by working directory. The **Tokens**
+screen shows daily spend stacked by model, per-app totals, and an explicit
+"Unattributed" bucket so nothing is silently dropped. Optional daily
+spend-threshold alerts arrive via ntfy. No API keys, no proxies, no app
+changes — that's Phase 4's opt-in runtime proxy.
+
+## Mobile app
+
+The [Expo app](mobile/) (iOS + Android, one codebase) connects straight to
+your hub URL: dashboard with the same on/off switches, app detail with live
+status/metrics/log tail, and the token summary. Multiple hubs supported;
+auth tokens live in the platform secure store. Run it today with
+`pnpm --filter mobile start` + Expo Go while store builds are pending.
+
 ## Roadmap
 
 - ~~**Phase 1:** macOS agent + hub + web dashboard walking skeleton — enroll, register an app, flip the switch, watch live CPU/mem~~ ✅
 - ~~**Phase 2:** Linux/VPS support, Docker & Compose apps, restart policies, log viewer, install scripts, ntfy alerts~~ ✅ — first public alpha
-- **Phase 3 (next):** Token tracking (Claude Code + Codex), mobile app (iOS/Android)
-- **Phase 4:** Windows agent, runtime token proxy, v0.1.0
+- ~~**Phase 3:** Token tracking (Claude Code + Codex), mobile app (iOS/Android)~~ ✅
+- **Phase 4 (next):** Windows agent, runtime token proxy, v0.1.0
 
 ## Development
 

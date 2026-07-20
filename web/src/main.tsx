@@ -6,6 +6,7 @@ import "./index.css";
 import App from "./App";
 import Login from "./pages/Login";
 import AppDetail from "./pages/AppDetail";
+import Tokens from "./pages/Tokens";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { refetchOnWindowFocus: true, retry: 1 } },
@@ -19,6 +20,7 @@ createRoot(document.getElementById("root")!).render(
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<App />} />
           <Route path="/apps/:id" element={<AppDetail />} />
+          <Route path="/tokens" element={<Tokens />} />
         </Routes>
       </BrowserRouter>
     </QueryClientProvider>

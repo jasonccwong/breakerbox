@@ -48,6 +48,9 @@ export default function App() {
           <h1 className="text-xl font-bold tracking-tight">BreakerBox</h1>
         </div>
         <div className="flex items-center gap-3">
+          <Link to="/tokens" className="text-sm text-zinc-400 hover:text-zinc-200">
+            Tokens
+          </Link>
           <button
             onClick={() => setEnrollOpen(true)}
             className="rounded-lg bg-amber-500 px-3 py-1.5 text-sm font-semibold text-zinc-950 hover:bg-amber-400"

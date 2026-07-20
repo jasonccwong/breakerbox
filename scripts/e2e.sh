@@ -88,7 +88,11 @@ export BREAKERBOX_STATE_DIR="$AGENT_DIR"
 "$TMP/agent" enroll --hub "$BASE" --token "$ENROLL_TOKEN" --name e2e-host | grep -q enrolled || fail "agent enroll"
 
 log "starting agent daemon"
-"$TMP/agent" run >"$TMP/agent.log" 2>&1 &
+# Agent runs with a fixture HOME so tokenwatch reads controlled transcripts
+# (created later in the token scenario), not this machine's real ~/.claude.
+FAKEHOME="$TMP/fakehome"
+mkdir -p "$FAKEHOME"
+HOME="$FAKEHOME" "$TMP/agent" run >"$TMP/agent.log" 2>&1 &
 AGENT_PID=$!
 wait_until 15 "system online" bash -c \
   "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/systems/records' | grep -q '\"status\":\"online\"'"
@@ -101,6 +105,7 @@ cat > "$TMP/breakerbox.app.json" <<EOF
   "kind": "process",
   "cmd": "$TMP/testapp",
   "args": ["-port", "$APP_PORT"],
+  "cwd": "$TMP",
   "ports": [$APP_PORT],
   "stop": {"signal": "SIGTERM", "timeout_s": 5}
 }
@@ -149,7 +154,7 @@ log "agent crash -> resurrect with orphan reap"
 kill -9 "$AGENT_PID"
 sleep 1
 curl -sf "http://127.0.0.1:$APP_PORT/health" >/dev/null || fail "orphan app should still be serving after agent death"
-"$TMP/agent" run >>"$TMP/agent.log" 2>&1 &
+HOME="$FAKEHOME" "$TMP/agent" run >>"$TMP/agent.log" 2>&1 &
 AGENT_PID=$!
 wait_until 20 "system back online" bash -c \
   "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/systems/records' | grep -q '\"status\":\"online\"'"
@@ -208,6 +213,56 @@ if docker info >/dev/null 2>&1; then
 else
   log "docker unavailable — skipping container scenario"
 fi
+
+log "token tracking: fixture transcripts -> priced, attributed rows"
+NOW_TS=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
+CLAUDE_DIR="$FAKEHOME/.claude/projects/-e2e-proj"
+CODEX_DIR="$FAKEHOME/.codex/sessions/$(date -u +%Y/%m/%d)"
+mkdir -p "$CLAUDE_DIR" "$CODEX_DIR"
+# Two Claude rows: one attributed (cwd = app cwd), one unmatched; plus garbage.
+cat > "$CLAUDE_DIR/sess.jsonl" <<EOF
+{"type":"assistant","cwd":"$TMP","sessionId":"e2e-sess","requestId":"req_e2e_1","timestamp":"$NOW_TS","message":{"id":"msg_e2e_1","model":"claude-fable-5","usage":{"input_tokens":100,"output_tokens":200,"cache_creation_input_tokens":1000,"cache_read_input_tokens":2000}}}
+{not json garbage line
+{"type":"assistant","cwd":"/nowhere/else","sessionId":"e2e-sess","requestId":"req_e2e_2","timestamp":"$NOW_TS","message":{"id":"msg_e2e_2","model":"claude-fable-5","usage":{"input_tokens":50,"output_tokens":60,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+EOF
+# Codex cumulative counters -> one delta row.
+cat > "$CODEX_DIR/rollout-e2e.jsonl" <<EOF
+{"timestamp":"$NOW_TS","type":"session_meta","payload":{"type":"session_meta","id":"codex-e2e","cwd":"$TMP"}}
+{"timestamp":"$NOW_TS","type":"turn_context","payload":{"type":"turn_context","model":"gpt-5.1-codex"}}
+{"timestamp":"$NOW_TS","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50,"total_tokens":1050}}}}
+EOF
+
+wait_until 40 "token rows ingested (scan interval 15s)" bash -c \
+  "curl -sf -H 'Authorization: $AUTH_TOKEN' '$BASE/api/collections/token_usage/records?perPage=1' | grep -q '\"totalItems\":3'"
+TOKENS_JSON=$(auth_curl "$BASE/api/collections/token_usage/records?perPage=10")
+echo "$TOKENS_JSON" | grep -q "\"app\":\"$APP_ID\"" || fail "no token row attributed to the app via cwd"
+echo "$TOKENS_JSON" | grep -q '"app":""' || fail "unmatched row should sit in the system bucket"
+echo "$TOKENS_JSON" | grep -q '"source":"codex"' || fail "codex delta row missing"
+# claude-fable-5 pricing: 100*1e-5 + 200*5e-5 + 1000*1.25e-5 + 2000*1e-6 = 0.0255
+python3 - "$TOKENS_JSON" <<'EOF'
+import json, sys
+rows = json.loads(sys.argv[1])["items"]
+row = next(r for r in rows if r["dedup_key"] == "msg_e2e_1:req_e2e_1")
+assert abs(row["cost_usd"] - 0.0255) < 1e-9, f"cost {row['cost_usd']} != 0.0255"
+EOF
+log "token pricing verified (\$0.0255 for fixture row)"
+
+SUMMARY=$(auth_curl "$BASE/api/bb/tokens/summary?days=7")
+echo "$SUMMARY" | grep -q '"claude-fable-5"' || fail "summary missing model breakdown"
+echo "$SUMMARY" | python3 -c 'import sys,json; d=json.load(sys.stdin); assert d["totals"]["cost"] > 0.025' \
+  || fail "summary totals wrong"
+log "token summary endpoint verified"
+
+log "spend alert: threshold below today's spend -> single ntfy"
+auth_curl -X PATCH "$BASE/api/collections/settings/records/$SETTINGS_ID" \
+  -H 'Content-Type: application/json' \
+  -d '{"notify_spend": true, "spend_threshold_usd": 0.01}' >/dev/null
+# New usage triggers the check on next ingest.
+cat >> "$CLAUDE_DIR/sess.jsonl" <<EOF
+{"type":"assistant","cwd":"$TMP","sessionId":"e2e-sess","requestId":"req_e2e_3","timestamp":"$NOW_TS","message":{"id":"msg_e2e_3","model":"claude-fable-5","usage":{"input_tokens":10,"output_tokens":10,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+EOF
+wait_until 40 "spend threshold ntfy alert" bash -c "grep -q 'spend' '$TMP/ntfy.log'"
+log "spend alert verified"
 
 log "waiting for a metrics cycle (30s interval)"
 wait_until 45 "system metrics rows" bash -c \

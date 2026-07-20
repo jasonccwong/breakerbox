@@ -16,6 +16,7 @@ import (
 	"github.com/breakerbox/breakerbox/agent/internal/collector"
 	"github.com/breakerbox/breakerbox/agent/internal/dockerapp"
 	"github.com/breakerbox/breakerbox/agent/internal/supervisor"
+	"github.com/breakerbox/breakerbox/agent/internal/tokenwatch"
 	"github.com/breakerbox/breakerbox/agent/internal/transport"
 	"github.com/breakerbox/breakerbox/pkg/protocol"
 )
@@ -106,6 +107,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	go d.metricsLoop(ctx)
 	go d.spoolLoop(ctx)
 	go d.dockerLoop(ctx)
+	go tokenwatch.New(d.store.Dir, d.resolveAppByCwd, d.emitTokenRows).Run(ctx)
 
 	var backoff transport.Backoff
 	for ctx.Err() == nil {
@@ -169,7 +171,7 @@ func (d *Daemon) sendHello(conn *transport.Conn) {
 	}
 	d.mu.Unlock()
 
-	caps := []string{}
+	caps := []string{"tokenwatch"}
 	if d.docker != nil {
 		caps = append(caps, "docker")
 		if dockerapp.ComposeAvailable() {

@@ -20,12 +20,22 @@ import (
 // maxClockSkew bounds the accepted age of the WS auth signature timestamp.
 const maxClockSkew = 5 * time.Minute
 
+// TokenIngestor stores harvested token usage (implemented by the tokens
+// package; an interface here avoids an import cycle).
+type TokenIngestor interface {
+	Ingest(systemID string, batch protocol.TokenUsageBatch) error
+}
+
 // Hub wires the agent WebSocket plane into a PocketBase app.
 type Hub struct {
-	app  core.App
-	reg  *registry
-	logs *logBroker
+	app    core.App
+	reg    *registry
+	logs   *logBroker
+	tokens TokenIngestor // optional; set via SetTokenIngestor
 }
+
+// SetTokenIngestor attaches the token usage sink (called from main wiring).
+func (h *Hub) SetTokenIngestor(t TokenIngestor) { h.tokens = t }
 
 // Register attaches the agent WS route and the command-dispatch hook.
 func Register(pb core.App) *Hub {
@@ -166,6 +176,15 @@ func (h *Hub) handleFrame(c *conn, system *core.Record, env protocol.Envelope) e
 			return err
 		}
 		return h.onAppRegister(c, reg)
+	case protocol.TypeTokenUsageBatch:
+		if h.tokens == nil {
+			return nil
+		}
+		var batch protocol.TokenUsageBatch
+		if err := json.Unmarshal(env.D, &batch); err != nil {
+			return err
+		}
+		return h.tokens.Ingest(c.systemID, batch)
 	case protocol.TypeLogChunk:
 		var chunk protocol.LogChunk
 		if err := json.Unmarshal(env.D, &chunk); err != nil {

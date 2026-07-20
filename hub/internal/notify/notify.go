@@ -163,6 +163,12 @@ func (n *Notifier) onSystemUpdate(rec *core.Record) {
 	}
 }
 
+// Send exposes ntfy delivery to other hub packages (spend alerts). It obeys
+// the configured endpoint like every internal alert.
+func (n *Notifier) Send(title, body, priority, tags string) error {
+	return n.send(title, body, priority, tags)
+}
+
 // enabled reads one settings toggle (and requires a configured endpoint).
 func (n *Notifier) enabled(field string) bool {
 	s := n.settings()
