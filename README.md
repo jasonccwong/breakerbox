@@ -6,7 +6,7 @@ BreakerBox is a lightweight, open-source control panel for the apps you run on y
 
 Think **Beszel + Dockge + ccusage in one pane**.
 
-> ⚠️ **Status: pre-alpha, under active development.** The walking skeleton (hub + macOS agent + web dashboard) is being built in the open. Nothing is stable yet — star/watch the repo if you want to follow along.
+> ⚠️ **Status: alpha, under active development.** Hub + agent (macOS & Linux) + web dashboard work end-to-end today: app on/off switches, native **and Docker/Compose** apps, crash-restart policies, resurrect-on-boot, live log streaming, metric history, and ntfy push alerts. Token tracking and mobile land next. Nothing is stable yet — star/watch to follow along.
 
 ## Why another panel?
 
@@ -45,11 +45,31 @@ Every existing tool does part of this, none does all of it:
                    supervises apps · collects metrics · tails token logs
 ```
 
+## Quick start
+
+Hub (any always-on box — VPS, home server, or the Mac you're on):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jasonccwong/breakerbox/main/scripts/install-hub.sh | sh
+```
+
+Open `http://localhost:8090`, create your account, click **+ Add system**, and
+paste the generated command on each machine you want on the panel:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/jasonccwong/breakerbox/main/scripts/install-agent.sh \
+  | sh -s -- --hub https://your-hub --token <ENROLL_TOKEN>
+```
+
+Then **+ Add app** → let Claude Code/Codex generate the app definition → approve
+it on the host → flip the switch. Hub at home? See [docs/home-hub.md](docs/home-hub.md)
+for Cloudflare Tunnel / Tailscale setups.
+
 ## Roadmap
 
-- **Phase 1 (now):** macOS agent + hub + web dashboard walking skeleton — enroll, register an app, flip the switch, watch live CPU/mem
-- **Phase 2:** Linux/VPS support, Docker & Compose apps, restart policies, log viewer, install scripts, ntfy alerts — first public alpha
-- **Phase 3:** Token tracking (Claude Code + Codex), mobile app (iOS/Android)
+- ~~**Phase 1:** macOS agent + hub + web dashboard walking skeleton — enroll, register an app, flip the switch, watch live CPU/mem~~ ✅
+- ~~**Phase 2:** Linux/VPS support, Docker & Compose apps, restart policies, log viewer, install scripts, ntfy alerts~~ ✅ — first public alpha
+- **Phase 3 (next):** Token tracking (Claude Code + Codex), mobile app (iOS/Android)
 - **Phase 4:** Windows agent, runtime token proxy, v0.1.0
 
 ## Development
