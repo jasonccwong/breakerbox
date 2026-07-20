@@ -1,0 +1,11 @@
+# Normalize line endings so golden-file byte comparisons and shell scripts
+# behave identically on every OS (Windows runners check out CRLF by default).
+* text=auto
+*.go text eol=lf
+*.golden.json text eol=lf
+*.json text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+Makefile text eol=lf
+*.ps1 text eol=crlf
