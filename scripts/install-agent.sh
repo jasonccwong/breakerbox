@@ -94,6 +94,12 @@ case "$OS" in
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>EnvironmentVariables</key><dict>
+    <!-- launchd's default PATH is bare; include the places dev tools
+         (node/npm via homebrew, etc.) actually live so supervised apps
+         can resolve their commands. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
   <key>StandardOutPath</key><string>/tmp/breakerbox-agent.log</string>
   <key>StandardErrorPath</key><string>/tmp/breakerbox-agent.log</string>
 </dict></plist>

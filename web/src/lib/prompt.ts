@@ -30,6 +30,12 @@ Requirements:
 1. Inspect the project (package.json scripts, Procfile, pyproject/requirements, docker-compose, Makefile, README) to determine the PRODUCTION start command — not the dev/watch command if a production one exists (e.g. prefer "npm run start" or a built binary over "npm run dev"; for Python prefer gunicorn/uvicorn invocations if configured).
 2. The command must run in the FOREGROUND (no daemonizing flags, no "&", no nohup) — the supervisor manages backgrounding.
 3. Use the absolute path of this project directory for "cwd".
+3b. CRITICAL: the agent runs as a background service with a MINIMAL PATH
+   (launchd/systemd defaults — no homebrew, no nvm, no ~/.local/bin). So:
+   use the ABSOLUTE path for "cmd" (resolve it now with \`which <cmd>\`), and
+   set "env.PATH" to a colon-joined PATH that includes the directories of
+   every tool the command needs at runtime (e.g. node for npm scripts) plus
+   the system defaults (/usr/bin:/bin:/usr/sbin:/sbin).
 4. Target OS: ${os}. Use paths/executables valid on it.
 5. If the app needs a build step before it can start, run that build now so the start command works immediately.
 6. List every port the app listens on; add a health_check URL if the app serves HTTP.
