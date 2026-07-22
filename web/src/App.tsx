@@ -307,18 +307,38 @@ function EnrollModal({ onClose }: { onClose: () => void }) {
       .catch(() => setError("Could not mint an enrollment token."));
   }, []);
 
-  const oneLiner = token
-    ? `breakerbox-agent enroll --hub ${window.location.origin} --token ${token}\nbreakerbox-agent run`
+  const hub = window.location.origin;
+  const unixOneLiner = token
+    ? `curl -fsSL https://raw.githubusercontent.com/jasonccwong/breakerbox/main/scripts/install-agent.sh | sh -s -- --hub ${hub} --token ${token}`
+    : "…";
+  const windowsOneLiner = token
+    ? `irm https://raw.githubusercontent.com/jasonccwong/breakerbox/main/scripts/install-agent.ps1 -OutFile install-agent.ps1; .\\install-agent.ps1 -Hub ${hub} -Token ${token}`
     : "…";
 
   return (
     <Modal title="Add a system" onClose={onClose}>
       <p className="mb-3 text-sm text-zinc-400">
-        On the machine you want to control, install the agent, then run (token valid 30 minutes, single use):
+        Run this on the machine you want to control — it downloads the agent,
+        connects it to this hub, and sets it to start on boot (token valid 30
+        minutes, single use):
       </p>
-      {error ? <p className="text-sm text-red-400">{error}</p> : <CopyBlock text={oneLiner} />}
+      {error ? (
+        <p className="text-sm text-red-400">{error}</p>
+      ) : (
+        <>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-zinc-500">macOS / Linux</p>
+          <CopyBlock text={unixOneLiner} />
+          <p className="mb-1 mt-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">
+            Windows (admin PowerShell)
+          </p>
+          <CopyBlock text={windowsOneLiner} />
+        </>
+      )}
       <p className="mt-3 text-xs text-zinc-500">
-        The agent dials out to this hub — no ports to open on the machine.
+        The agent dials out to this hub — no ports to open on the machine. Agent
+        already installed? Run{" "}
+        <code className="rounded bg-zinc-900 px-1">breakerbox-agent enroll --hub {hub} --token {token ?? "…"}</code>{" "}
+        instead.
       </p>
     </Modal>
   );
